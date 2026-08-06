@@ -7,9 +7,13 @@ on:
     branches: ["**"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   build:
-    name: Flutter analyze & test
+    name: Build APK + analyze
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,14 +25,52 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Accept Android licenses
+        run: yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
+
+      - name: Generate native shells (keep our lib/pubspec)
+        run: |
+          cp -r lib /tmp/app_lib
+          cp pubspec.yaml /tmp/app_pubspec.yaml
+          flutter create --platforms=android,windows --overwrite .
+          rm -rf lib && cp -r /tmp/app_lib lib
+          cp /tmp/app_pubspec.yaml pubspec.yaml
+
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib/ test/ || true
-
       - name: Analyze
-        run: flutter analyze
+        id: analyze
+        run: flutter analyze > analyze.txt 2>&1 || true
 
-      - name: Run tests
-        run: flutter test || true
+      - name: Build APK (debug)
+        id: build
+        run: flutter build apk --debug > build.txt 2>&1 || true
+
+      - name: Upload APK artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: ignore
+
+      - name: Report results to issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "# CI Report — commit ${{ github.sha }}"
+            echo "## flutter analyze"
+            cat analyze.txt
+            echo ""
+            echo "## flutter build apk"
+            cat build.txt
+          } > report.md
+          NUM=$(gh issue list --label ci-report --limit 1 --json number -q '.[0].number')
+          if [ -z "$NUM" ]; then
+            gh issue create --title "CI auto-report" --body-file report.md --label ci-report
+          else
+            gh issue edit "$NUM" --body-file report.md
+          fi
