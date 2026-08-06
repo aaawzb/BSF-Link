@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../measure/measure_screen.dart';
+import 'package:bsf_scale/app/adaptive.dart';
+import 'package:bsf_scale/features/measure/measure_screen.dart';
 
 /// 首页（落地页）：精简入口，直达测量。后续可在此扩展多成员切换 / 历史入口。
 class HomeScreen extends StatelessWidget {

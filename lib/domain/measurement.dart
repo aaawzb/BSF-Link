@@ -1,4 +1,5 @@
 /// 体脂秤测量领域模型（与 UI / 存储解耦的纯数据层，跨端共享）。
+library;
 
 /// 一次原始蓝牙报文解析后的结果。
 class RawScalePacket {

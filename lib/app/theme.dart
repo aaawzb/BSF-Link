@@ -19,7 +19,7 @@ ThemeData buildAppTheme({ColorScheme? dynamicScheme, required bool isDark}) {
     brightness: isDark ? Brightness.dark : Brightness.light,
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       elevation: 0,
       shape: cardShape,
       color: scheme.surfaceContainerHigh,

@@ -1,10 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../domain/measurement.dart';
-import '../../app/adaptive.dart';
-import '../../ble/scale_ble_client.dart';
-import 'measure_view_model.dart';
+import 'package:bsf_scale/domain/measurement.dart';
+import 'package:bsf_scale/app/adaptive.dart';
+import 'package:bsf_scale/features/measure/measure_view_model.dart';
 
 /// 测量页：聚焦"测量 → 结果"。自适应布局，任意屏幕尺寸可用。
 class MeasureScreen extends ConsumerStatefulWidget {
@@ -36,11 +35,7 @@ class _MeasureScreenState extends ConsumerState<MeasureScreen> {
 
     final client = ref.read(scaleBleClientProvider);
     final notifier = ref.read(measurementProvider.notifier);
-    notifier.state = notifier.state.copyWith(
-      phase: MeasurementPhase.scanning,
-      statusText: '搜索体脂秤…',
-      clearError: true,
-    );
+    notifier.markScanning();
 
     _scanSub = client.scan().listen((device) async {
       // 命中 AFU 设备即连接（名称含 "AFU"）。可按需改为以 MAC 白名单匹配。
@@ -55,13 +50,7 @@ class _MeasureScreenState extends ConsumerState<MeasureScreen> {
     await Future.delayed(const Duration(seconds: 8));
     await _scanSub?.cancel();
     _scanSub = null;
-    final s = ref.read(measurementProvider);
-    if (s.phase == MeasurementPhase.scanning) {
-      ref.read(measurementProvider.notifier).state = s.copyWith(
-        phase: MeasurementPhase.error,
-        error: '未找到体脂秤，请站上秤再试',
-      );
-    }
+    ref.read(measurementProvider.notifier).markScanTimeout();
   }
 
   @override

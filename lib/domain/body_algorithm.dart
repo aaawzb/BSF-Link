@@ -1,5 +1,5 @@
 import 'dart:math';
-import 'measurement.dart';
+import 'package:bsf_scale/domain/measurement.dart';
 
 /// BIA 身体指标算法（精确移植自开源项目 maoziban/smart-body-scale-android 的 BodyAlgorithm.kt）。
 ///

@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../domain/measurement.dart';
-import '../../domain/body_algorithm.dart';
-import '../../ble/scale_ble_client.dart';
+import 'package:bsf_scale/domain/measurement.dart';
+import 'package:bsf_scale/domain/body_algorithm.dart';
+import 'package:bsf_scale/ble/scale_ble_client.dart';
 
 /// BLE 客户端单例（后续可注入多实例 / 测试替身）。
 final scaleBleClientProvider =
@@ -97,6 +97,25 @@ class MeasurementNotifier extends StateNotifier<MeasurementState> {
     _sub?.cancel();
     _sub = null;
     state = const MeasurementState();
+  }
+
+  /// 进入扫描阶段（由 UI 触发，避免在 Widget 中直接写 state）。
+  void markScanning() {
+    state = state.copyWith(
+      phase: MeasurementPhase.scanning,
+      statusText: '搜索体脂秤…',
+      clearError: true,
+    );
+  }
+
+  /// 扫描超时：若仍处于 scanning 则置为错误。
+  void markScanTimeout() {
+    if (state.phase == MeasurementPhase.scanning) {
+      state = state.copyWith(
+        phase: MeasurementPhase.error,
+        error: '未找到体脂秤，请站上秤再试',
+      );
+    }
   }
 
   @override

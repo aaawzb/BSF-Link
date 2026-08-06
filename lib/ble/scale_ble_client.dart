@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../domain/measurement.dart';
-import 'afu_packet_parser.dart';
+import 'package:bsf_scale/domain/measurement.dart';
+import 'package:bsf_scale/ble/afu_packet_parser.dart';
 
 /// 体脂秤 BLE 客户端：扫描 / 连接 / 订阅 FFB2 报文。
 ///
@@ -19,7 +19,6 @@ class ScaleBleClient {
   /// AFU 数据特征 UUID（FFB2）。字符串常量用于稳定比较，避免 Uuid 相等比较不可靠。
   static const String _dataCharacteristicUuid =
       '0000ffb2-0000-1000-8000-00805f9b34fb';
-  static final Uuid _dataCharacteristic = Uuid.fromString(_dataCharacteristicUuid);
 
   /// 扫描附近设备（不限服务）。
   Stream<DiscoveredDevice> scan() {
@@ -51,7 +50,7 @@ class ScaleBleClient {
   /// 连接设备并持续产出解析后的测量报文。
   Stream<RawScalePacket> connectAndListen(String deviceId) async* {
     await for (final state in _ble.connectToDevice(id: deviceId)) {
-      if (state.connectionStatus == ConnectionStatus.connected) {
+      if (state.connectionState == ConnectionState.connected) {
         // Android：申请高优先级连接，降低服务发现与订阅延迟。
         try {
           await _ble.requestConnectionPriority(
@@ -76,14 +75,15 @@ class ScaleBleClient {
 
   Future<QualifiedCharacteristic?> _findDataCharacteristic(String deviceId) async {
     try {
-      final services = await _ble.discoverServices(deviceId);
+      final services = await _ble.discoverAllServices(deviceId);
       for (final svc in services) {
         for (final ch in svc.characteristics) {
-          if (ch.id.toString().toUpperCase() == _dataCharacteristicUuid.toUpperCase()) {
+          if (ch.characteristicId.toString().toUpperCase() ==
+              _dataCharacteristicUuid.toUpperCase()) {
             return QualifiedCharacteristic(
-              serviceId: svc.id,
+              serviceId: svc.serviceId,
               deviceId: deviceId,
-              characteristicId: ch.id,
+              characteristicId: ch.characteristicId,
             );
           }
         }

@@ -1,4 +1,4 @@
-import '../domain/measurement.dart';
+import 'package:bsf_scale/domain/measurement.dart';
 
 /// 蚂蚁阿福(AFU)体脂秤蓝牙报文解析（跨端共享纯 Dart 层）。
 ///
