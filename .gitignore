@@ -1,0 +1,33 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-1.0.0/
+.pub-cache/
+.pub/
+build/
+*.iml
+*.kt
+*.kts
+.gradle/
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+linux/
+macos/
+web/
+ios/
+windows/  # 由 flutter create 生成；如需版本化可移除本行
+
+# IntelliJ / Android Studio
+.idea/
+*.jks
+*.keystore
+key.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local / secrets
+*.local
+.env
