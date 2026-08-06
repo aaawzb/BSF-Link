@@ -22,10 +22,18 @@ class _MeasureScreenState extends ConsumerState<MeasureScreen> {
   @override
   void dispose() {
     _scanSub?.cancel();
+    // 释放 BLE 连接与订阅，避免离开页面后后台仍在监听秤数据。
+    ref.read(measurementProvider.notifier).stop();
     super.dispose();
   }
 
   Future<void> _startMeasurement() async {
+    // 防重入：扫描中/测量中不再接受重复触发。
+    final current = ref.read(measurementProvider).phase;
+    if (current != MeasurementPhase.idle && current != MeasurementPhase.error) {
+      return;
+    }
+
     final client = ref.read(scaleBleClientProvider);
     final notifier = ref.read(measurementProvider.notifier);
     notifier.state = notifier.state.copyWith(

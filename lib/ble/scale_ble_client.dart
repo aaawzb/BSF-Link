@@ -30,15 +30,22 @@ class ScaleBleClient {
   }
 
   /// 请求蓝牙 / 定位权限。
-  /// Android 12+ 仅需蓝牙权限；Android 9–11 扫描必须定位权限。
+  ///
+  /// Android 12+（API 31+）仅需蓝牙权限；Android 9–11 扫描必须定位权限。
+  /// flutter_reactive_ble 在 31+ 自动使用 neverForLocation，无需定位即可扫描。
+  ///
+  /// 实现取舍（v1）：不引入 device_info_plus，定位权限「请求但不强制拦截」——
+  ///   - 12+ 用户拒绝定位：BLE 仍能工作（neverForLocation）。
+  ///   - 9–11 用户拒绝定位：扫描会在运行时失败，由连接错误处理器提示。
+  /// 后续若需按 SDK 精确分支，可引入 device_info_plus 检测 sdkInt。
   Future<bool> ensurePermissions() async {
     final scan = await Permission.bluetoothScan.request();
     final connect = await Permission.bluetoothConnect.request();
     if (!scan.isGranted || !connect.isGranted) return false;
 
-    // Android 12 以下扫描需要定位权限（flutter_reactive_ble 在 31+ 用 neverForLocation）。
-    final location = await Permission.locationWhenInUse.request();
-    return location.isGranted;
+    // 定位权限：9–11 必需；12+ 非强制（flutter_reactive_ble 已处理）。
+    await Permission.locationWhenInUse.request();
+    return true;
   }
 
   /// 连接设备并持续产出解析后的测量报文。

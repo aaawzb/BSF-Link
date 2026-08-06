@@ -3,8 +3,7 @@
 > 本环境未安装 Flutter，以下代码为脚手架，请在本地 Flutter 环境中完成初始化与验证。
 
 ## 1. 前置条件
-- Flutter SDK ≥ 3.22（Material 3 + dynamic_color 支持），Dart ≥ 3.4
-- 依赖 `drift` 已锁定到 `2.22.0`（仅需 Dart ≥ 3.3），与 Flutter 3.22 兼容；如需用更新 drift，请将 Flutter 升级到 Dart ≥ 3.10 的版本
+- Flutter SDK ≥ 3.24（Dart ≥ 3.10，匹配 drift 2.34 线要求），推荐 stable 最新
 - Android Studio / VS Code + 真机（Android 9+，支持 BLE）
 - Windows 10/11（桌面端，可选）
 
@@ -19,7 +18,9 @@ flutter create --platforms=android,windows .
 > 若已存在 `pubspec.yaml`，`flutter create` 会补全缺失的原生平台目录，不会覆盖你的 `lib/`。
 
 ## 3. Android 权限配置
-编辑 `android/app/src/main/AndroidManifest.xml`，在 `<manifest>` 下加入：
+> CI 已自动注入：每次 `flutter create` 生成原生壳后，CI 会用脚本把蓝牙/定位权限写入 `AndroidManifest.xml` 并把 `minSdk` 设为 `28`（Android 9）。本地开发请手动照做（见下）。
+
+编辑 `android/app/src/main/AndroidManifest.xml`，在 `<manifest ...>` 标签补 `xmlns:tools="http://schemas.android.com/tools"`，并在 `<application` 前加入：
 
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH"/>
@@ -32,7 +33,7 @@ flutter create --platforms=android,windows .
     android:maxSdkVersion="30" />
 ```
 
-并将 `android/app/build.gradle` 中 `minSdk` 设为 `28`（Android 9），`targetSdk` 设为 `34`+。
+并将 `android/app/build.gradle.kts` 中 `minSdk` 设为 `28`（Android 9）。
 
 ## 4. 运行
 ```bash

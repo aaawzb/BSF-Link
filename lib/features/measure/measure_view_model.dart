@@ -56,6 +56,8 @@ class MeasurementNotifier extends StateNotifier<MeasurementState> {
 
   /// 连接指定设备并监听解析后的报文，实时更新指标。
   Future<void> start(String deviceId, UserProfile profile) async {
+    // 重入保护：取消上一次可能仍在运行的连接/订阅，避免叠加。
+    _sub?.cancel();
     state = state.copyWith(
       phase: MeasurementPhase.connecting,
       statusText: '连接中…',

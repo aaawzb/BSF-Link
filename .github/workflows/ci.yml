@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   issues: write
+  checks: write
 
 jobs:
   build:
@@ -28,30 +29,82 @@ jobs:
       - name: Accept Android licenses
         run: yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
 
-      - name: Generate native shells (keep our lib/pubspec)
+      - name: Generate native shells (keep our lib/pubspec/analysis_options)
         run: |
           cp -r lib /tmp/app_lib
           cp pubspec.yaml /tmp/app_pubspec.yaml
-          flutter create --platforms=android,windows --overwrite .
+          cp analysis_options.yaml /tmp/app_analysis_options.yaml
+          flutter create --platforms=android,windows .
           rm -rf lib && cp -r /tmp/app_lib lib
           cp /tmp/app_pubspec.yaml pubspec.yaml
+          cp /tmp/app_analysis_options.yaml analysis_options.yaml
+
+      - name: Patch Android (BLE permissions + minSdk 28)
+        run: |
+          python3 - <<'PY'
+          import re, io
+
+          # 1) AndroidManifest.xml：注入蓝牙/定位权限 + tools 命名空间
+          man = "android/app/src/main/AndroidManifest.xml"
+          s = open(man, encoding="utf-8").read()
+          if "BLUETOOTH_SCAN" not in s:
+              # 增加 tools 命名空间（neverForLocation 标记需要）
+              s = s.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n'
+                  '    xmlns:tools="http://schemas.android.com/tools">',
+                  1,
+              )
+              perms = (
+                  '    <uses-permission android:name="android.permission.BLUETOOTH"/>\n'
+                  '    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>\n'
+                  '    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" '
+                  'android:usesPermissionFlags="neverForLocation"/>\n'
+                  '    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>\n'
+                  '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" '
+                  'android:maxSdkVersion="30"/>\n'
+              )
+              s = s.replace("    <application", perms + "    <application", 1)
+              open(man, "w", encoding="utf-8").write(s)
+              print("AndroidManifest patched with BLE permissions")
+          else:
+              print("AndroidManifest already patched, skip")
+
+          # 2) build.gradle.kts：minSdk 提至 28（Android 9，满足项目要求）
+          gradle = "android/app/build.gradle.kts"
+          g = open(gradle, encoding="utf-8").read()
+          new_g = re.sub(r"minSdk = \d+", "minSdk = 28", g)
+          new_g = re.sub(r"minSdk = flutter\.minSdkVersion", "minSdk = 28", new_g)
+          if new_g != g:
+              open(gradle, "w", encoding="utf-8").write(new_g)
+              print("minSdk set to 28")
+          else:
+              print("minSdk not found / already 28")
+          PY
 
       - name: Install dependencies
-        # 即使 pub get 失败也继续，确保后续报告能产出真实错误
         run: flutter pub get > pubget.txt 2>&1 || true
 
       - name: Analyze
         run: flutter analyze > analyze.txt 2>&1 || true
 
       - name: Build APK (debug)
-        run: flutter build apk --debug > build.txt 2>&1 || true
+        run: |
+          set +e
+          flutter build apk --debug > build.txt 2>&1
+          echo "BUILD_EXIT=$?" >> build.txt
+          set -e
 
-      - name: Upload APK artifact
+      - name: Upload logs + APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: ci-logs-and-apk
+          path: |
+            pubget.txt
+            analyze.txt
+            build.txt
+            build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: ignore
 
       - name: Report results to issue
@@ -59,16 +112,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh label create ci-report --color "0E8A16" 2>/dev/null || true
           {
             echo "# CI Report — commit ${{ github.sha }}"
+            echo ""
             echo "## flutter pub get"
             cat pubget.txt 2>/dev/null || echo "（pub get 未捕获输出）"
             echo ""
             echo "## flutter analyze"
             cat analyze.txt 2>/dev/null || echo "（analyze 未生成）"
             echo ""
-            echo "## flutter build apk"
-            cat build.txt 2>/dev/null || echo "（build 未生成）"
+            echo "## flutter build apk (tail)"
+            tail -n 60 build.txt 2>/dev/null || echo "（build 未生成）"
           } > report.md
           NUM=$(gh issue list --label ci-report --limit 1 --json number -q '.[0].number')
           if [ -z "$NUM" ]; then
