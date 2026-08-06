@@ -16,14 +16,15 @@ class ScaleBleClient {
 
   /// 体脂秤数据特征（AFU: FFB2）。服务 UUID 在真机发现后确认，
   /// 故采用"连接后遍历服务查找 FFB2 特征"的稳健方式，避免硬编服务 UUID。
-  static final Uuid _dataCharacteristic = Uuid.fromString(
-    '0000ffb2-0000-1000-8000-00805f9b34fb',
-  );
+  /// AFU 数据特征 UUID（FFB2）。字符串常量用于稳定比较，避免 Uuid 相等比较不可靠。
+  static const String _dataCharacteristicUuid =
+      '0000ffb2-0000-1000-8000-00805f9b34fb';
+  static final Uuid _dataCharacteristic = Uuid.fromString(_dataCharacteristicUuid);
 
   /// 扫描附近设备（不限服务）。
   Stream<DiscoveredDevice> scan() {
     return _ble.scanForDevices(
-      withServices: const [],
+      withServices: const <Uuid>[],
       scanMode: ScanMode.lowLatency,
     );
   }
@@ -42,13 +43,13 @@ class ScaleBleClient {
 
   /// 连接设备并持续产出解析后的测量报文。
   Stream<RawScalePacket> connectAndListen(String deviceId) async* {
-    await for (final state in _ble.connectToDevice(deviceId)) {
+    await for (final state in _ble.connectToDevice(id: deviceId)) {
       if (state.connectionStatus == ConnectionStatus.connected) {
         // Android：申请高优先级连接，降低服务发现与订阅延迟。
         try {
           await _ble.requestConnectionPriority(
             deviceId: deviceId,
-            priority: ConnectionPriority.high,
+            priority: ConnectionPriority.highPerformance,
           );
         } catch (_) {
           // 非 Android 平台忽略。
@@ -71,7 +72,7 @@ class ScaleBleClient {
       final services = await _ble.discoverServices(deviceId);
       for (final svc in services) {
         for (final ch in svc.characteristics) {
-          if (ch.id == _dataCharacteristic) {
+          if (ch.id.toString().toUpperCase() == _dataCharacteristicUuid.toUpperCase()) {
             return QualifiedCharacteristic(
               serviceId: svc.id,
               deviceId: deviceId,

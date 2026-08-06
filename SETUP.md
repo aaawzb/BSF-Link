@@ -3,7 +3,8 @@
 > 本环境未安装 Flutter，以下代码为脚手架，请在本地 Flutter 环境中完成初始化与验证。
 
 ## 1. 前置条件
-- Flutter SDK ≥ 3.22（Material 3 + dynamic_color 支持）
+- Flutter SDK ≥ 3.22（Material 3 + dynamic_color 支持），Dart ≥ 3.4
+- 依赖 `drift` 已锁定到 `2.22.0`（仅需 Dart ≥ 3.3），与 Flutter 3.22 兼容；如需用更新 drift，请将 Flutter 升级到 Dart ≥ 3.10 的版本
 - Android Studio / VS Code + 真机（Android 9+，支持 BLE）
 - Windows 10/11（桌面端，可选）
 
@@ -44,7 +45,7 @@ flutter run -d windows
 ```
 
 ## 5. 已知待办（下一阶段）
-- **M2**：从开源项目完整移植双频阻抗 BIA 算法，替换 `lib/domain/body_algorithm.dart` 的占位估算（当前 `estimated` 分支为近似，非真值）。
+- **M2（已完成）**：`lib/domain/body_algorithm.dart` 已精确移植开源项目 BIA 算法（男/女双分支、阻抗>0 用 BIA、否则降级估算）。
 - **M3**：多成员家庭管理（档案增删、首测绑定、±7kg 动态匹配）+ drift 本地存储。
 - **M5**：Windows ↔ Android 数据同步机制确认（本地备份导入 / 局域网传输，不引入云端）。
-- 服务 UUID `0000ffb2` 为常见约定值；若真机特征 UUID 不同，调整 `ScaleBleClient._dataCharacteristic`。
+- 服务特征 UUID `0000ffb2` 为常见约定值；若真机特征 UUID 不同，调整 `ScaleBleClient._dataCharacteristicUuid`（字符串常量，便于稳定比较）。
