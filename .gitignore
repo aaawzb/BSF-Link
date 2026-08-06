@@ -31,3 +31,6 @@ Thumbs.db
 # Local / secrets
 *.local
 .env
+
+# Local dev memory (planning notes, not source)
+.workbuddy/
