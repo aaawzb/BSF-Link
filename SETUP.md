@@ -42,7 +42,7 @@ flutter create --platforms=android,windows .
 # Android 真机
 flutter run
 
-# Windows 桌面（BLE 在 Windows 上由 flutter_reactive_ble 经 WinRT 提供，需真机验证）
+# Windows 桌面（BLE 经已背书伴侣包 flutter_blue_plus_winrt 自动提供，需真机验证）
 flutter config --enable-windows-desktop
 flutter run -d windows
 ```

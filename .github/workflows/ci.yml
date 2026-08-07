@@ -1,4 +1,4 @@
-name: CI
+name: Build & Pre-release
 
 on:
   push:
@@ -7,16 +7,17 @@ on:
     branches: ["**"]
   workflow_dispatch:
 
+# 预发布需要创建 tag + release，故需要 contents: write。
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
-  build:
-    name: Build debug APK
+  # ───────────────────────── Android ─────────────────────────
+  build-android:
+    name: Build Android APK
     runs-on: ubuntu-latest
     steps:
-      # ─── 1. 检出 + Flutter 环境 ───
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -29,7 +30,6 @@ jobs:
       - name: Accept Android licenses
         run: yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
 
-      # ─── 2. 生成安卓原生壳（仅 android，跳过 windows） ───
       - name: Generate Android shell
         run: |
           cp -r lib /tmp/app_lib
@@ -40,16 +40,17 @@ jobs:
           cp /tmp/app_pubspec.yaml pubspec.yaml
           cp /tmp/app_analysis_options.yaml analysis_options.yaml
 
-      # ─── 3. 修补 Android 构建配置 ───
-      # compileSdk=35（满足 reactive_ble 等依赖的 ≥34 要求）
-      # minSdk=28（项目目标 Android 9+）
-      # AndroidManifest 注入蓝牙 5 权限
+      # 修补 Android 构建配置：
+      #  - AndroidManifest 注入蓝牙/定位权限
+      #  - compileSdk=35（满足 flutter_blue_plus 等 AndroidX 依赖的 >=34 要求）
+      #  - minSdk=28（Android 9+）
+      #  - 关键：用根工程 subprojects 强制"所有模块(含插件)"compileSdk=35，
+      #    否则插件模块(:reactive_ble 等历史)编译于 android-33 会令 AAR 校验失败。
       - name: Patch Android build config
         run: |
           python3 - <<'PY'
           import re
 
-          # 3a. AndroidManifest 注入蓝牙/定位权限
           man = "android/app/src/main/AndroidManifest.xml"
           s = open(man, encoding="utf-8").read()
           if "BLUETOOTH_SCAN" not in s:
@@ -72,50 +73,35 @@ jobs:
               open(man, "w", encoding="utf-8").write(s)
               print("AndroidManifest: BLE permissions injected")
 
-          # 3b. build.gradle.kts: compileSdk=35, minSdk=28
           gradle = "android/app/build.gradle.kts"
           g = open(gradle, encoding="utf-8").read()
-
-          g = re.sub(
-              r"compileSdk\s*=\s*flutter\.compileSdkVersion",
-              "compileSdk = 35",
-              g,
-          )
+          g = re.sub(r"compileSdk\s*=\s*flutter\.compileSdkVersion", "compileSdk = 35", g)
           g = re.sub(r"compileSdk\s*=\s*\d+", "compileSdk = 35", g)
           g = re.sub(r"minSdk\s*=\s*flutter\.minSdkVersion", "minSdk = 28", g)
           g = re.sub(r"minSdk\s*=\s*\d+", "minSdk = 28", g)
-
           open(gradle, "w", encoding="utf-8").write(g)
           print("app/build.gradle.kts: compileSdk=35, minSdk=28")
 
-          # 3c. 根工程脚本强制所有模块(含插件) compileSdk=35
-          # 关键: AAR 元数据校验报错的是插件模块(:reactive_ble_mobile 等),
-          # 它们用 flutter.compileSdkVersion(3.44 默认 33)。仅改 app 模块不够,
-          # 必须用 subprojects 在 afterEvaluate 阶段覆盖全部模块的 compileSdk。
+          # 根工程脚本：强制所有模块(含插件) compileSdk=35
           root = "android/build.gradle.kts"
           r = open(root, encoding="utf-8").read()
-          block = """
-subprojects {
-    afterEvaluate {
-        val lib = extensions.findByType(com.android.build.api.dsl.LibraryExtension::class.java)
-        if (lib != null) { lib.compileSdk = 35 }
-        val app = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
-        if (app != null) { app.compileSdk = 35 }
-    }
-}
-"""
-          if "compileSdk = 35" not in r:
-              # 避免重复追加; 只在文件无 subprojects 覆盖时写入
-              if "subprojects {" not in r:
-                  open(root, "a", encoding="utf-8").write(block)
-                  print("root/build.gradle.kts: subprojects compileSdk=35 appended")
-              else:
-                  print("root/build.gradle.kts: subprojects already present, skip")
+          if "subprojects {" not in r:
+              block = """
+      subprojects {
+          afterEvaluate {
+              val lib = extensions.findByType(com.android.build.api.dsl.LibraryExtension::class.java)
+              if (lib != null) { lib.compileSdk = 35 }
+              val app = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
+              if (app != null) { app.compileSdk = 35 }
+          }
+      }
+      """
+              open(root, "a", encoding="utf-8").write(block)
+              print("root/build.gradle.kts: subprojects compileSdk=35 appended")
           else:
-              print("root/build.gradle.kts: compileSdk=35 already present, skip")
+              print("root/build.gradle.kts: subprojects already present, skip")
           PY
 
-      # ─── 4. 依赖 + 静态分析 ───
       - name: Install dependencies
         run: flutter pub get | tee pubget.txt
 
@@ -123,7 +109,6 @@ subprojects {
         continue-on-error: true
         run: flutter analyze | tee analyze.txt
 
-      # ─── 5. 编译 Android Debug APK ───
       - name: Build debug APK
         run: |
           flutter build apk --debug 2>&1 | tee build.txt
@@ -135,12 +120,11 @@ subprojects {
             echo "APK NOT FOUND" >> build.txt
           fi
 
-      # ─── 6. 上传产物 ───
-      - name: Upload artifacts
+      - name: Upload Android artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-output
+          name: android-apk
           path: |
             pubget.txt
             analyze.txt
@@ -148,29 +132,99 @@ subprojects {
             build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: ignore
 
-      # ─── 7. 写入 CI 报告到 issue #1 ───
-      - name: Report to issue
+  # ───────────────────────── Windows ─────────────────────────
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Generate Windows shell
+        shell: bash
+        run: |
+          cp -r lib /tmp/app_lib
+          cp pubspec.yaml /tmp/app_pubspec.yaml
+          cp analysis_options.yaml /tmp/app_analysis_options.yaml
+          flutter create --platforms=windows .
+          rm -rf lib && cp -r /tmp/app_lib lib
+          cp /tmp/app_pubspec.yaml pubspec.yaml
+          cp /tmp/app_analysis_options.yaml analysis_options.yaml
+
+      - name: Install dependencies
+        shell: bash
+        run: flutter pub get | tee pubget.txt
+
+      - name: Analyze
+        continue-on-error: true
+        shell: bash
+        run: flutter analyze | tee analyze.txt
+
+      - name: Build Windows
+        shell: bash
+        run: |
+          flutter build windows 2>&1 | tee build.txt
+          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> build.txt
+          EXE="build/windows/x64/runner/Release/bsf_scale.exe"
+          if [ -f "$EXE" ]; then
+            echo "EXE SIZE: $(du -h "$EXE" | cut -f1)" >> build.txt
+            tar -a -cf windows-build.zip -C build/windows/x64/runner/Release .
+          else
+            echo "EXE NOT FOUND" >> build.txt
+          fi
+
+      - name: Upload Windows artifact
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            pubget.txt
+            analyze.txt
+            build.txt
+            windows-build.zip
+          if-no-files-found: ignore
+
+  # ───────────────────────── Pre-release ─────────────────────────
+  release:
+    name: Publish Pre-release
+    needs: [build-android, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Pre-release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh label create ci-report --color "0E8A16" 2>/dev/null || true
-          {
-            echo "# CI Report — commit ${{ github.sha }}"
-            echo ""
-            echo "## flutter analyze"
-            echo '```'
-            tail -n 8 analyze.txt 2>/dev/null || echo "(not captured)"
-            echo '```'
-            echo ""
-            echo "## flutter build apk"
-            echo '```'
-            tail -n 60 build.txt 2>/dev/null || echo "(not captured)"
-            echo '```'
-          } > report.md
-          NUM=$(gh issue list --label ci-report --limit 1 --json number -q '.[0].number')
-          if [ -z "$NUM" ]; then
-            gh issue create --title "CI auto-report" --body-file report.md --label ci-report
-          else
-            gh issue edit "$NUM" --body-file report.md
+          TAG="pre-${{ github.run_number }}-${{ github.sha }}"
+          ASSETS=()
+          if [ -f "artifacts/android-apk/app-debug.apk" ]; then
+            ASSETS+=("artifacts/android-apk/app-debug.apk#BSF-Link-Android.apk")
           fi
+          if [ -f "artifacts/windows-build/windows-build.zip" ]; then
+            ASSETS+=("artifacts/windows-build/windows-build.zip#BSF-Link-Windows.zip")
+          fi
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "No build artifacts produced; skip release."
+            exit 0
+          fi
+          gh release create "$TAG" --prerelease \
+            --title "Pre-release #${{ github.run_number }}" \
+            --notes "Automated pre-release from commit ${{ github.sha }}." \
+            "${ASSETS[@]}"

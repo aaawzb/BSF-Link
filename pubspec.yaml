@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_reactive_ble: ^5.0.3   # 跨端 BLE（Android BLE Core / Windows WinRT BLE）
+  flutter_blue_plus: ^1.35.1   # 跨端 BLE（Android/iOS/macOS/Linux/Web + Windows 经已背书伴侣包 winrt 自动包含）
   drift: ^2.34.0                 # 本地 SQLite（跨端，Room 的精神继承者）
   drift_flutter: ^0.3.1          # drift 的 Flutter 集成（版本独立，非 2.x）
   path_provider: ^2.1.3

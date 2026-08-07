@@ -27,7 +27,7 @@
 |--------|------|
 | 框架 | Flutter 3.44+（Dart 3.10+） |
 | 跨端状态 | flutter_riverpod 2.x |
-| 蓝牙 | flutter_reactive_ble 5.x（Android BLE Core / Windows WinRT） |
+| 蓝牙 | flutter_blue_plus 1.x（Android/iOS/macOS/Linux/Web；Windows 经已背书伴侣包 flutter_blue_plus_winrt 自动包含） |
 | 本地存储 | drift 2.34 + drift_flutter（SQLite，M3 起接入） |
 | 动态主题 | dynamic_color（Android 取系统配色，其它平台用种子色兜底） |
 | 权限 | permission_handler（Android 9–11 定位 / 12+ 蓝牙） |

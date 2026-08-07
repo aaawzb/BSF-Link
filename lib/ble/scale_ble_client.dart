@@ -1,96 +1,82 @@
 import 'dart:async';
-import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:bsf_scale/domain/measurement.dart';
+import 'package:bsf_scale/domain/ble_device.dart';
 import 'package:bsf_scale/ble/afu_packet_parser.dart';
 
 /// 体脂秤 BLE 客户端：扫描 / 连接 / 订阅 FFB2 报文。
 ///
-/// 传输层与平台相关（Android 走 BLE Core，Windows 走 WinRT BLE），
-/// 由 flutter_reactive_ble 封装；解析层(AfuPacketParser)为跨端共享纯 Dart。
+/// 传输层由 flutter_blue_plus 封装（Android BLE Core / Windows WinRT BLE /
+/// macOS / Linux 等），解析层(AfuPacketParser)为跨端共享纯 Dart。
+/// 扫描结果用中性 [BleDevice] 暴露给 UI，避免 UI 耦合具体 BLE 库。
 class ScaleBleClient {
-  final FlutterReactiveBle _ble;
-
-  ScaleBleClient([FlutterReactiveBle? ble])
-      : _ble = ble ?? FlutterReactiveBle();
-
-  /// 体脂秤数据特征（AFU: FFB2）。服务 UUID 在真机发现后确认，
-  /// 故采用"连接后遍历服务查找 FFB2 特征"的稳健方式，避免硬编服务 UUID。
   /// AFU 数据特征 UUID（FFB2）。字符串常量用于稳定比较，避免 Uuid 相等比较不可靠。
   static const String _dataCharacteristicUuid =
       '0000ffb2-0000-1000-8000-00805f9b34fb';
 
-  /// 扫描附近设备（不限服务）。
-  Stream<DiscoveredDevice> scan() {
-    return _ble.scanForDevices(
-      withServices: const <Uuid>[],
-      scanMode: ScanMode.lowLatency,
-    );
-  }
-
   /// 请求蓝牙 / 定位权限。
   ///
   /// Android 12+（API 31+）仅需蓝牙权限；Android 9–11 扫描必须定位权限。
-  /// flutter_reactive_ble 在 31+ 自动使用 neverForLocation，无需定位即可扫描。
-  ///
-  /// 实现取舍（v1）：不引入 device_info_plus，定位权限「请求但不强制拦截」——
-  ///   - 12+ 用户拒绝定位：BLE 仍能工作（neverForLocation）。
-  ///   - 9–11 用户拒绝定位：扫描会在运行时失败，由连接错误处理器提示。
-  /// 后续若需按 SDK 精确分支，可引入 device_info_plus 检测 sdkInt。
+  /// flutter_blue_plus 在 31+ 自动使用 neverForLocation，无需定位即可扫描。
   Future<bool> ensurePermissions() async {
     final scan = await Permission.bluetoothScan.request();
     final connect = await Permission.bluetoothConnect.request();
     if (!scan.isGranted || !connect.isGranted) return false;
 
-    // 定位权限：9–11 必需；12+ 非强制（flutter_reactive_ble 已处理）。
+    // 定位权限：9–11 必需；12+ 非强制（flutter_blue_plus 已处理）。
     await Permission.locationWhenInUse.request();
     return true;
   }
 
-  /// 连接设备并持续产出解析后的测量报文。
-  Stream<RawScalePacket> connectAndListen(String deviceId) async* {
-    await for (final state in _ble.connectToDevice(id: deviceId)) {
-      if (state.connectionState == DeviceConnectionState.connected) {
-        // Android：申请高优先级连接，降低服务发现与订阅延迟。
-        try {
-          await _ble.requestConnectionPriority(
-            deviceId: deviceId,
-            priority: ConnectionPriority.highPerformance,
-          );
-        } catch (_) {
-          // 非 Android 平台忽略。
-        }
+  /// 停止正在进行的扫描（连接命中或超时后调用，避免后台持续扫描）。
+  void stopScan() => FlutterBluePlus.stopScan();
 
-        final characteristic = await _findDataCharacteristic(deviceId);
-        if (characteristic == null) return;
-
-        // 5.x 新模型：Characteristic.subscribe() 即通知流（内部处理 CCCD 开关）。
-        await for (final bytes in characteristic.subscribe()) {
-          final packet = AfuPacketParser.parse(bytes);
-          if (packet != null) yield packet;
-        }
-        return;
-      }
-    }
+  /// 扫描附近设备，逐个以中性 [BleDevice] 形式产出。
+  ///
+  /// flutter_blue_plus 的 onScanResults 每次推送当前结果列表；这里展开为
+  /// 单设备事件流，保持与原 "每发现一台设备触发一次" 的行为一致。
+  Stream<BleDevice> scan() {
+    // 启动扫描（自带 8s 超时）；结果通过 onScanResults 流出。
+    final _ = FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+    return FlutterBluePlus.onScanResults.expand(
+      (results) => results.map(
+        (r) => BleDevice(r.device.remoteId.str, r.device.platformName),
+      ),
+    );
   }
 
-  Future<Characteristic?> _findDataCharacteristic(String deviceId) async {
-    try {
-      // flutter_reactive_ble 5.x：服务发现"触发"与"取结果"拆成两个方法。
-      // discoverAllServices 返回 Future<void>，随后用 getDiscoveredServices 拿结果。
-      await _ble.discoverAllServices(deviceId);
-      final services = await _ble.getDiscoveredServices(deviceId);
-      for (final svc in services) {
-        for (final ch in svc.characteristics) {
-          if (ch.id.toString().toUpperCase() ==
-              _dataCharacteristicUuid.toUpperCase()) {
-            return ch;
-          }
+  /// 连接设备并持续产出解析后的测量报文。
+  Stream<RawScalePacket> connectAndListen(String deviceId) async* {
+    // flutter_blue_plus：凭 remoteId 构造设备对象即可连接（无需先扫描到）。
+    final device = BluetoothDevice.fromId(deviceId);
+
+    await device.connect();
+
+    // 等待连接真正建立（必要时在 Windows 上也同样适用）。
+    await device.connectionState
+        .where((s) => s == BluetoothConnectionState.connected)
+        .first;
+
+    final services = await device.discoverServices();
+    BluetoothCharacteristic? target;
+    for (final svc in services) {
+      for (final ch in svc.characteristics) {
+        if (ch.uuid.toString().toUpperCase() ==
+            _dataCharacteristicUuid.toUpperCase()) {
+          target = ch;
+          break;
         }
       }
-    } catch (_) {
-      return null;
+      if (target != null) break;
     }
-    return null;
+    if (target == null) return;
+
+    // 开启通知（CCCD），监听特征值变化即为秤的实时报文。
+    await target.setNotifyValue(true);
+    await for (final bytes in target.onValueReceived) {
+      final packet = AfuPacketParser.parse(bytes);
+      if (packet != null) yield packet;
+    }
   }
 }

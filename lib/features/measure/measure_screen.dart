@@ -42,6 +42,7 @@ class _MeasureScreenState extends ConsumerState<MeasureScreen> {
       if (device.name.toUpperCase().contains('AFU')) {
         await _scanSub?.cancel();
         _scanSub = null;
+        client.stopScan();
         await notifier.start(device.id, _profile);
       }
     });
@@ -50,6 +51,7 @@ class _MeasureScreenState extends ConsumerState<MeasureScreen> {
     await Future.delayed(const Duration(seconds: 8));
     await _scanSub?.cancel();
     _scanSub = null;
+    client.stopScan();
     ref.read(measurementProvider.notifier).markScanTimeout();
   }
 
