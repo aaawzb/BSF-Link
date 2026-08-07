@@ -10,13 +10,13 @@ on:
 permissions:
   contents: read
   issues: write
-  checks: write
 
 jobs:
   build:
-    name: Build APK + analyze
+    name: Build debug APK
     runs-on: ubuntu-latest
     steps:
+      # ─── 1. 检出 + Flutter 环境 ───
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -29,26 +29,30 @@ jobs:
       - name: Accept Android licenses
         run: yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
 
-      - name: Generate native shells (keep our lib/pubspec/analysis_options)
+      # ─── 2. 生成安卓原生壳（仅 android，跳过 windows） ───
+      - name: Generate Android shell
         run: |
           cp -r lib /tmp/app_lib
           cp pubspec.yaml /tmp/app_pubspec.yaml
           cp analysis_options.yaml /tmp/app_analysis_options.yaml
-          flutter create --platforms=android,windows .
+          flutter create --platforms=android .
           rm -rf lib && cp -r /tmp/app_lib lib
           cp /tmp/app_pubspec.yaml pubspec.yaml
           cp /tmp/app_analysis_options.yaml analysis_options.yaml
 
-      - name: Patch Android (BLE permissions + minSdk 28)
+      # ─── 3. 修补 Android 构建配置 ───
+      # compileSdk=35（满足 reactive_ble 等依赖的 ≥34 要求）
+      # minSdk=28（项目目标 Android 9+）
+      # AndroidManifest 注入蓝牙 5 权限
+      - name: Patch Android build config
         run: |
           python3 - <<'PY'
-          import re, io
+          import re
 
-          # 1) AndroidManifest.xml：注入蓝牙/定位权限 + tools 命名空间
+          # 3a. AndroidManifest 注入蓝牙/定位权限
           man = "android/app/src/main/AndroidManifest.xml"
           s = open(man, encoding="utf-8").read()
           if "BLUETOOTH_SCAN" not in s:
-              # 增加 tools 命名空间（neverForLocation 标记需要）
               s = s.replace(
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
                   '<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n'
@@ -66,40 +70,51 @@ jobs:
               )
               s = s.replace("    <application", perms + "    <application", 1)
               open(man, "w", encoding="utf-8").write(s)
-              print("AndroidManifest patched with BLE permissions")
-          else:
-              print("AndroidManifest already patched, skip")
+              print("AndroidManifest: BLE permissions injected")
 
-          # 2) build.gradle.kts：minSdk 提至 28（Android 9，满足项目要求）
+          # 3b. build.gradle.kts: compileSdk=35, minSdk=28
           gradle = "android/app/build.gradle.kts"
           g = open(gradle, encoding="utf-8").read()
-          new_g = re.sub(r"minSdk = \d+", "minSdk = 28", g)
-          new_g = re.sub(r"minSdk = flutter\.minSdkVersion", "minSdk = 28", new_g)
-          if new_g != g:
-              open(gradle, "w", encoding="utf-8").write(new_g)
-              print("minSdk set to 28")
-          else:
-              print("minSdk not found / already 28")
+
+          g = re.sub(
+              r"compileSdk\s*=\s*flutter\.compileSdkVersion",
+              "compileSdk = 35",
+              g,
+          )
+          g = re.sub(r"compileSdk\s*=\s*\d+", "compileSdk = 35", g)
+          g = re.sub(r"minSdk\s*=\s*flutter\.minSdkVersion", "minSdk = 28", g)
+          g = re.sub(r"minSdk\s*=\s*\d+", "minSdk = 28", g)
+
+          open(gradle, "w", encoding="utf-8").write(g)
+          print("build.gradle.kts: compileSdk=35, minSdk=28")
           PY
 
+      # ─── 4. 依赖 + 静态分析 ───
       - name: Install dependencies
-        run: flutter pub get > pubget.txt 2>&1 || true
+        run: flutter pub get | tee pubget.txt
 
       - name: Analyze
-        run: flutter analyze > analyze.txt 2>&1 || true
+        continue-on-error: true
+        run: flutter analyze | tee analyze.txt
 
-      - name: Build APK (debug)
+      # ─── 5. 编译 Android Debug APK ───
+      - name: Build debug APK
         run: |
-          set +e
-          flutter build apk --debug > build.txt 2>&1
-          echo "BUILD_EXIT=$?" >> build.txt
-          set -e
+          flutter build apk --debug 2>&1 | tee build.txt
+          echo "BUILD_EXIT=${PIPESTATUS[0]}" >> build.txt
+          APK="build/app/outputs/flutter-apk/app-debug.apk"
+          if [ -f "$APK" ]; then
+            echo "APK SIZE: $(du -h "$APK" | cut -f1)" >> build.txt
+          else
+            echo "APK NOT FOUND" >> build.txt
+          fi
 
-      - name: Upload logs + APK
+      # ─── 6. 上传产物 ───
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-logs-and-apk
+          name: ci-output
           path: |
             pubget.txt
             analyze.txt
@@ -107,7 +122,8 @@ jobs:
             build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: ignore
 
-      - name: Report results to issue
+      # ─── 7. 写入 CI 报告到 issue #1 ───
+      - name: Report to issue
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,14 +132,15 @@ jobs:
           {
             echo "# CI Report — commit ${{ github.sha }}"
             echo ""
-            echo "## flutter pub get"
-            cat pubget.txt 2>/dev/null || echo "（pub get 未捕获输出）"
-            echo ""
             echo "## flutter analyze"
-            cat analyze.txt 2>/dev/null || echo "（analyze 未生成）"
+            echo '```'
+            tail -n 8 analyze.txt 2>/dev/null || echo "(not captured)"
+            echo '```'
             echo ""
-            echo "## flutter build apk (tail)"
-            tail -n 60 build.txt 2>/dev/null || echo "（build 未生成）"
+            echo "## flutter build apk"
+            echo '```'
+            tail -n 60 build.txt 2>/dev/null || echo "(not captured)"
+            echo '```'
           } > report.md
           NUM=$(gh issue list --label ci-report --limit 1 --json number -q '.[0].number')
           if [ -z "$NUM" ]; then

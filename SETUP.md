@@ -33,7 +33,9 @@ flutter create --platforms=android,windows .
     android:maxSdkVersion="30" />
 ```
 
-并将 `android/app/build.gradle.kts` 中 `minSdk` 设为 `28`（Android 9）。
+并将 `android/app/build.gradle.kts` 中：
+- `compileSdk` 设为 `35`（reactive_ble 等依赖要求 ≥34）
+- `minSdk` 设为 `28`（Android 9）
 
 ## 4. 运行
 ```bash
