@@ -86,7 +86,33 @@ jobs:
           g = re.sub(r"minSdk\s*=\s*\d+", "minSdk = 28", g)
 
           open(gradle, "w", encoding="utf-8").write(g)
-          print("build.gradle.kts: compileSdk=35, minSdk=28")
+          print("app/build.gradle.kts: compileSdk=35, minSdk=28")
+
+          # 3c. 根工程脚本强制所有模块(含插件) compileSdk=35
+          # 关键: AAR 元数据校验报错的是插件模块(:reactive_ble_mobile 等),
+          # 它们用 flutter.compileSdkVersion(3.44 默认 33)。仅改 app 模块不够,
+          # 必须用 subprojects 在 afterEvaluate 阶段覆盖全部模块的 compileSdk。
+          root = "android/build.gradle.kts"
+          r = open(root, encoding="utf-8").read()
+          block = """
+subprojects {
+    afterEvaluate {
+        val lib = extensions.findByType(com.android.build.api.dsl.LibraryExtension::class.java)
+        if (lib != null) { lib.compileSdk = 35 }
+        val app = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
+        if (app != null) { app.compileSdk = 35 }
+    }
+}
+"""
+          if "compileSdk = 35" not in r:
+              # 避免重复追加; 只在文件无 subprojects 覆盖时写入
+              if "subprojects {" not in r:
+                  open(root, "a", encoding="utf-8").write(block)
+                  print("root/build.gradle.kts: subprojects compileSdk=35 appended")
+              else:
+                  print("root/build.gradle.kts: subprojects already present, skip")
+          else:
+              print("root/build.gradle.kts: compileSdk=35 already present, skip")
           PY
 
       # ─── 4. 依赖 + 静态分析 ───
