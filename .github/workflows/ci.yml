@@ -30,6 +30,17 @@ jobs:
       - name: Accept Android licenses
         run: yes | flutter doctor --android-licenses > /dev/null 2>&1 || true
 
+      - name: Ensure Android SDK platform 36
+        run: |
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SM" ] || SM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SM" ]; then
+            yes | "$SM" "platforms;android-36" >/dev/null 2>&1 || true
+            echo "ensured platforms;android-36"
+          else
+            echo "sdkmanager not found; relying on preinstalled platforms"
+          fi
+
       - name: Generate Android shell
         run: |
           cp -r lib /tmp/app_lib
@@ -42,10 +53,10 @@ jobs:
 
       # 修补 Android 构建配置：
       #  - AndroidManifest 注入蓝牙/定位权限
-      #  - compileSdk=35（满足 flutter_blue_plus 等 AndroidX 依赖的 >=34 要求）
+      #  - compileSdk=36（flutter_blue_plus_android 7.0.4 要求 >=36）
       #  - minSdk=28（Android 9+）
-      #  - 关键：用根工程 subprojects 强制"所有模块(含插件)"compileSdk=35，
-      #    否则插件模块(:reactive_ble 等历史)编译于 android-33 会令 AAR 校验失败。
+      #  - 关键：用根工程 subprojects 强制"所有模块(含插件)"compileSdk=36，
+      #    否则插件模块各自用 flutter.compileSdkVersion 会令 AAR 校验失败。
       - name: Patch Android build config
         run: |
           python3 - <<'PY'
@@ -76,14 +87,14 @@ jobs:
 
           gradle = "android/app/build.gradle.kts"
           g = open(gradle, encoding="utf-8").read()
-          g = re.sub(r"compileSdk\s*=\s*flutter\.compileSdkVersion", "compileSdk = 35", g)
-          g = re.sub(r"compileSdk\s*=\s*\d+", "compileSdk = 35", g)
+          g = re.sub(r"compileSdk\s*=\s*flutter\.compileSdkVersion", "compileSdk = 36", g)
+          g = re.sub(r"compileSdk\s*=\s*\d+", "compileSdk = 36", g)
           g = re.sub(r"minSdk\s*=\s*flutter\.minSdkVersion", "minSdk = 28", g)
           g = re.sub(r"minSdk\s*=\s*\d+", "minSdk = 28", g)
           open(gradle, "w", encoding="utf-8").write(g)
-          print("app/build.gradle.kts: compileSdk=35, minSdk=28")
+          print("app/build.gradle.kts: compileSdk=36, minSdk=28")
 
-          # 根工程脚本：强制所有模块(含插件) compileSdk=35
+          # 根工程脚本：强制所有模块(含插件) compileSdk=36
           root = "android/build.gradle.kts"
           r = open(root, encoding="utf-8").read()
           if "subprojects {" not in r:
@@ -92,15 +103,15 @@ jobs:
                   subprojects {
                       afterEvaluate {
                           val lib = extensions.findByType(com.android.build.api.dsl.LibraryExtension::class.java)
-                          if (lib != null) { lib.compileSdk = 35 }
+                          if (lib != null) { lib.compileSdk = 36 }
                           val app = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
-                          if (app != null) { app.compileSdk = 35 }
+                          if (app != null) { app.compileSdk = 36 }
                       }
                   }
                   """
               )
               open(root, "a", encoding="utf-8").write(block)
-              print("root/build.gradle.kts: subprojects compileSdk=35 appended")
+              print("root/build.gradle.kts: subprojects compileSdk=36 appended")
           else:
               print("root/build.gradle.kts: subprojects already present, skip")
           PY
@@ -162,6 +173,27 @@ jobs:
           rm -rf lib && cp -r /tmp/app_lib lib
           cp /tmp/app_pubspec.yaml pubspec.yaml
           cp /tmp/app_analysis_options.yaml analysis_options.yaml
+
+      - name: Patch Windows build config
+        shell: bash
+        run: |
+          f="windows/CMakeLists.txt"
+          [ -f "$f" ] || { echo "$f not found, skip"; exit 0; }
+          if grep -q "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS" "$f"; then
+            echo "silence macro already present, skip"
+            exit 0
+          fi
+          tmp="$f.new"
+          awk '
+            { print }
+            /^project\(/ && !done {
+              print ""
+              print "# Suppress MSVC <experimental/coroutine> deprecation hard-error (permission_handler_windows etc.)."
+              print "set(CMAKE_CXX_FLAGS \"${CMAKE_CXX_FLAGS} /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS\")"
+              done=1
+            }
+          ' "$f" > "$tmp" && mv "$tmp" "$f"
+          echo "injected silence macro into $f"
 
       - name: Install dependencies
         shell: bash
