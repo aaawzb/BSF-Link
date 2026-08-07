@@ -50,6 +50,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import re
+          import textwrap
 
           man = "android/app/src/main/AndroidManifest.xml"
           s = open(man, encoding="utf-8").read()
@@ -86,16 +87,18 @@ jobs:
           root = "android/build.gradle.kts"
           r = open(root, encoding="utf-8").read()
           if "subprojects {" not in r:
-              block = """
-      subprojects {
-          afterEvaluate {
-              val lib = extensions.findByType(com.android.build.api.dsl.LibraryExtension::class.java)
-              if (lib != null) { lib.compileSdk = 35 }
-              val app = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
-              if (app != null) { app.compileSdk = 35 }
-          }
-      }
-      """
+              block = textwrap.dedent(
+                  """
+                  subprojects {
+                      afterEvaluate {
+                          val lib = extensions.findByType(com.android.build.api.dsl.LibraryExtension::class.java)
+                          if (lib != null) { lib.compileSdk = 35 }
+                          val app = extensions.findByType(com.android.build.api.dsl.ApplicationExtension::class.java)
+                          if (app != null) { app.compileSdk = 35 }
+                      }
+                  }
+                  """
+              )
               open(root, "a", encoding="utf-8").write(block)
               print("root/build.gradle.kts: subprojects compileSdk=35 appended")
           else:
