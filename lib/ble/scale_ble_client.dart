@@ -50,7 +50,7 @@ class ScaleBleClient {
   /// 连接设备并持续产出解析后的测量报文。
   Stream<RawScalePacket> connectAndListen(String deviceId) async* {
     await for (final state in _ble.connectToDevice(id: deviceId)) {
-      if (state.connectionState == ConnectionState.connected) {
+      if (state.connectionState == DeviceConnectionState.connected) {
         // Android：申请高优先级连接，降低服务发现与订阅延迟。
         try {
           await _ble.requestConnectionPriority(
@@ -64,7 +64,8 @@ class ScaleBleClient {
         final characteristic = await _findDataCharacteristic(deviceId);
         if (characteristic == null) return;
 
-        await for (final bytes in _ble.subscribeToCharacteristic(characteristic)) {
+        // 5.x 新模型：Characteristic.subscribe() 即通知流（内部处理 CCCD 开关）。
+        await for (final bytes in characteristic.subscribe()) {
           final packet = AfuPacketParser.parse(bytes);
           if (packet != null) yield packet;
         }
@@ -73,18 +74,17 @@ class ScaleBleClient {
     }
   }
 
-  Future<QualifiedCharacteristic?> _findDataCharacteristic(String deviceId) async {
+  Future<Characteristic?> _findDataCharacteristic(String deviceId) async {
     try {
-      final services = await _ble.discoverAllServices(deviceId);
+      // flutter_reactive_ble 5.x：服务发现"触发"与"取结果"拆成两个方法。
+      // discoverAllServices 返回 Future<void>，随后用 getDiscoveredServices 拿结果。
+      await _ble.discoverAllServices(deviceId);
+      final services = await _ble.getDiscoveredServices(deviceId);
       for (final svc in services) {
         for (final ch in svc.characteristics) {
-          if (ch.characteristicId.toString().toUpperCase() ==
+          if (ch.id.toString().toUpperCase() ==
               _dataCharacteristicUuid.toUpperCase()) {
-            return QualifiedCharacteristic(
-              serviceId: svc.serviceId,
-              deviceId: deviceId,
-              characteristicId: ch.characteristicId,
-            );
+            return ch;
           }
         }
       }

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dynamic_color/dynamic_color.dart';
-import 'app/theme.dart';
-import 'features/home/home_screen.dart';
+import 'package:bsf_scale/app/theme.dart';
+import 'package:bsf_scale/features/home/home_screen.dart';
 
 void main() => runApp(const ProviderScope(child: MyApp()));
 
